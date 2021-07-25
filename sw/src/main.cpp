@@ -14,7 +14,7 @@
 
   ;upload_command = -p m328p -c usbasp -P usb -U flash:w:firmware.hex
   [platformio]
-  description = Incubator V.: 2.0.0
+  description = Incubator V.: 2.1.0
 */
 
 
@@ -237,7 +237,7 @@ void setup() {
   lcd.setCursor(4,0);
   lcd.print(F("Incubator"));
   lcd.setCursor(3,1);
-  lcd.print(F("SW.Ver.: 2.0.6"));
+  lcd.print(F("SW.Ver.: 2.1.0"));
   lcd.setCursor(3,2);
   lcd.print(F("HW.Ver.: 2.0.2"));
   lcd.setCursor(3,3);

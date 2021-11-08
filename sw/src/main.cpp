@@ -1,27 +1,28 @@
 /*
-  [env:uno]
-  platform = atmelavr
-  board = uno
-  framework = arduino
-  lib_deps = 
-    adafruit/Adafruit Unified Sensor@^1.1.4
-    adafruit/DHT sensor library@^1.4.2
-    fmalpartida/LiquidCrystal@^1.5.0
-    soligen2010/ClickEncoder@0.0.0-alpha+sha.9337a0c46c
-    alextaujenis/RBD_Servo@^1.0.2
-    paulstoffregen/TimerOne@^1.1
-  build_type = release
+[env:uno]
+platform = atmelavr
+board = uno
+framework = arduino
+lib_deps = 
+	fmalpartida/LiquidCrystal@^1.5.0
+	soligen2010/ClickEncoder@0.0.0-alpha+sha.9337a0c46c
+	paulstoffregen/TimerOne@^1.1
+	adafruit/Adafruit Unified Sensor@^1.1.4
+	adafruit/DHT sensor library@^1.4.2
+	alextaujenis/RBD_Servo@^1.0.2
+	ingelobito/RBDdimmer@^1.0
+build_type = release
+check_skip_packages = yes
 
-  ;upload_command = -p m328p -c usbasp -P usb -U flash:w:firmware.hex
-  [platformio]
-  description = Incubator V.: 2.1.0
+[platformio]
+description = Incubator V.:2.0.0, PID, AC/DC fűtés, rotary encoder, páratartalom beállítás
 */
 
 
-//#define USE_HUMIDIFIER    // Páratartalom beállítása
-//#define USE_EGGMOTOR      // ??? Valami lesz ???
-//#define I2C_LCD           // I2C lcd
-//#define USE_Triac         // AC fűtés használata!!!!
+//#define USE_HUMIDIFIER     // Páratartalom beállítása
+//#define USE_MOT2            // ??? Valami lesz ???
+//#define I2C_LCD            // I2C lcd
+//#define USE_AC_HEAT            // AC fűtés használata!!!!
 
 #include <Arduino.h>
 #include <Wire.h>
@@ -61,7 +62,7 @@ ClickEncoder encoder(pinA, pinB, pinSw, STEPS);
   #include <RBD_Servo.h>
   RBD::Servo servo1(1, 1000, 2000); //pin 5, 1ms - 2ms pulse (SG90)
 #endif
-#ifdef USE_EGGMOTOR
+#ifdef USE_MOT2
   #ifndef USE_HUMIDIFIER
     #include <RBD_Servo.h>
   #endif
@@ -114,13 +115,13 @@ double airTemp;   // Levegő hőm., T1+T2 átlaga
 
 
 
-#ifdef USE_Triac
+#ifdef USE_AC_HEAT
   #include <RBDdimmer.h>
 
   #define outputPin  10 
   //#define zerocross  2
 
-  dimmerLamp dimmer(outputPin);
+  dimmerLamp AC_heat(outputPin);
 
   int outMin = 0;    // pwm min: 0
   int outMax = 100;  // pwm max: 100
@@ -129,7 +130,7 @@ double airTemp;   // Levegő hőm., T1+T2 átlaga
   /*
     PWM heat
   */
-  uint8_t heat = 10;  // Fűtés
+  uint8_t DC_heat = 10;  // Fűtés
   
   int outMin = 0;    // pwm min: 0
   int outMax = 255;  // pwm max: 255
@@ -198,7 +199,7 @@ void setup() {
   #ifdef USE_HUMIDIFIER
     servo1.moveToDegrees(0);
   #endif
-  #ifdef USE_EGGMOTOR
+  #ifdef USE_MOT2
     servo2.moveToDegrees(0);
   #endif
 
@@ -208,13 +209,13 @@ void setup() {
   sensor_t sensor;
   dht.humidity().getSensor(&sensor);
 
-  #ifdef USE_Triac
-    dimmer.begin(NORMAL_MODE, ON);
-    dimmer.setPower(0);
-    dimmer.setState(OFF);
+  #ifdef USE_AC_HEAT
+    AC_heat.begin(NORMAL_MODE, ON);
+    AC_heat.setPower(0);
+    AC_heat.setState(OFF);
   #else
-    pinMode(heat, OUTPUT);  // PWM
-    digitalWrite(heat, LOW);
+    pinMode(DC_heat, OUTPUT);  // PWM
+    digitalWrite(DC_heat, LOW);
   #endif
 
   pinMode(vent, OUTPUT);  // PWM
@@ -237,11 +238,11 @@ void setup() {
   lcd.setCursor(4,0);
   lcd.print(F("Incubator"));
   lcd.setCursor(3,1);
-  lcd.print(F("SW.Ver.: 2.1.0"));
+  lcd.print(F("SW.Ver.: 2.0.6"));
   lcd.setCursor(3,2);
   lcd.print(F("HW.Ver.: 2.0.2"));
   lcd.setCursor(3,3);
-  #ifdef USE_Triac
+  #ifdef USE_AC_HEAT
     lcd.print(F("F"));lcd.write(3);lcd.print(F("t"));lcd.write(1);lcd.print(F("s : AC"));
   #else
     lcd.print(F("F"));lcd.write(3);lcd.print(F("t"));lcd.write(1);lcd.print(F("s : DC"));
@@ -458,11 +459,11 @@ void set_humid(){
 #endif
 
 void stop_incubation(){
-  #ifdef USE_Triac
-    dimmer.setPower(0);
-    dimmer.setState(OFF);
+  #ifdef USE_AC_HEAT
+    AC_heat.setPower(0);
+    AC_heat.setState(OFF);
   #else
-    digitalWrite(heat, LOW);
+    digitalWrite(DC_heat, LOW);
   #endif
   digitalWrite(vent, LOW);
   digitalWrite(LedErr, LOW);
@@ -478,9 +479,9 @@ void stop_incubation(){
 void run_incubation(){
   digitalWrite(LedRun, HIGH);
 
-  #ifdef USE_Triac
+  #ifdef USE_AC_HEAT
     // triak kimenet engedélyezése
-    if ( !dimmer.getState() ) { dimmer.setState(ON); }
+    if ( !AC_heat.getState() ) { AC_heat.setState(ON); }
   #endif
   // EEprom olvas
   EEPROM.get(EEADDR, StoreData);
@@ -497,47 +498,28 @@ void run_incubation(){
   T2 = t_2air.Thermistor_Read(); 
   airTemp = ( T1 + T2 ) / 2;
   TH = t_heat.Thermistor_Read();
-
   sensors_event_t event;
 
   // Érzékelők hibafigyelése 
-  if ( T1 < (-30.0) ){
+  if ( (T1 < (-30.0)) || ( T1 > 120.0 ) ){
     lcd.clear();
     lcd.setCursor(0, 0);
-    lcd.print(F("NTC 1 szakadt"));
+    lcd.print(F("Hiba: NTC 1"));
     wait_ms(2000L);
     stop_incubation();
-  } else if ( T1 > 120.0 ){
+  } else if ( (T2 < (-30.0)) || ( T2 > 120.0 )){
     lcd.clear();
     lcd.setCursor(0, 0);
-    lcd.print(F("NTC 1 zarlat"));
+    lcd.print(F("Hiba: NTC 2"));
     wait_ms(2000L);
     stop_incubation();
-  } else if ( T2 < (-30.0) ){
+  } else if ((TH < (-30.0)) || ( TH > 120.0 )){
     lcd.clear();
     lcd.setCursor(0, 0);
-    lcd.print(F("NTC 2 szakadt"));
+    lcd.print(F("Hiba: NTC Fu"));
     wait_ms(2000L);
     stop_incubation();
-  } else if ( T2 > 120.0 ){
-    lcd.clear();
-    lcd.setCursor(0, 0);
-    lcd.print(F("NTC 2 zarlat"));
-    wait_ms(2000L);
-    stop_incubation();
-  } else if ( TH < (-30.0) ){
-    lcd.clear();
-    lcd.setCursor(0, 0);
-    lcd.print(F("NTC Fu szakadt"));
-    wait_ms(2000L);
-    stop_incubation();
-  } else if ( TH > 120.0 ){
-    lcd.clear();
-    lcd.setCursor(0, 0);
-    lcd.print(F("NTC Fu zarlat"));
-    wait_ms(2000L);
-    stop_incubation();
-    } else { 
+  } else { 
 
     // millis()
     prevTime = Time;
@@ -557,16 +539,16 @@ void run_incubation(){
 
     // Fűtés       
     if ( TH < 77.0) {
-      #ifdef USE_Triac
-        dimmer.setPower(pwmOut);
+      #ifdef USE_AC_HEAT
+        AC_heat.setPower(pwmOut);
       #else
-        analogWrite(heat, pwmOut);
+        analogWrite(DC_heat, pwmOut);
       #endif
     } else if ( TH >= 80.0) {
-      #ifdef USE_Triac
-        dimmer.setPower(0);
+      #ifdef USE_AC_HEAT
+        AC_heat.setPower(0);
       #else
-        digitalWrite(heat, LOW);
+        digitalWrite(DC_heat, LOW);
       #endif
       
     }
@@ -606,7 +588,7 @@ void run_incubation(){
     //   Vent xx 
     lcd.print(F("Vent "));lcd.print(int(StoreData.pwm_vent/2.5)); lcd.print(F("%"));
     
-    #ifdef USE_Triac
+    #ifdef USE_AC_HEAT
       lcd.print(F(" F"));lcd.write(3);lcd.print(F("t ")); lcd.print(pwmOut); lcd.print(F("%"));
     #else
       lcd.print(F(" F"));lcd.write(3);lcd.print(F("t ")); lcd.print(int(pwmOut/2.55)); lcd.print(F("%"));
@@ -615,7 +597,7 @@ void run_incubation(){
     //fűtőtest hőm
     lcd.print(F("F.test ")); lcd.print(TH);
           
-    // LED vezérlés
+    // Hiba led vezérlés
     if ((airTemp >= (StoreData.kozep - StoreData.hyst)) && (airTemp <= (StoreData.kozep + StoreData.hyst))) {
       digitalWrite(LedErr, LOW);
       } else if (airTemp < (StoreData.kozep - StoreData.hyst)) {
@@ -733,7 +715,7 @@ void loop() {
   #ifdef USE_HUMIDIFIER
     servo1.update();
   #endif
-  #ifdef USE_EGGMOTOR
+  #ifdef USE_MOT2
     servo2.update();
   #endif
   encPos += encoder.getValue();
